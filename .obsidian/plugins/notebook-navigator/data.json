@@ -216,7 +216,7 @@
   "showAllPropertiesFolder": true,
   "scopePropertiesToCurrentContext": false,
   "defaultListMode": "standard",
-  "includeDescendantNotes": false,
+  "includeDescendantNotes": true,
   "defaultFolderSort": "modified-desc",
   "defaultFolderSortPropertyKey": "",
   "propertySortKey": "",
