@@ -1,163 +1,203 @@
 {
   "nodes": [
     {
-      "id": "title",
+      "id": "node_title",
       "type": "text",
-      "text": "# 🌟 SimpleClaw Agent 核心全景架构图\n> 自顶向下分为四大体系：协议网关层、核心心跳层、驱动与治理层、状态与消息总线",
-      "x": 80,
-      "y": -140,
-      "width": 1540,
+      "text": "# 🌟 SimpleClaw 智能体内核架构全景图 (Agent Architecture Master Map)\n> **四大核心体系**：接入与协议网关 ➔ 核心心跳与履约 ➔ 驱动与工具沙箱 ➔ 状态与高可用消息底座",
+      "x": 60,
+      "y": -130,
+      "width": 1720,
       "height": 90,
       "color": "6"
     },
     {
+      "id": "grp_1",
+      "type": "group",
+      "label": "【第一层：接入与协议网关层】 Client & Gateway Ingress",
+      "x": 60,
+      "y": 0,
+      "width": 1720,
+      "height": 260,
+      "color": "4"
+    },
+    {
       "id": "n_user",
       "type": "text",
-      "text": "### 1. 用户端意图输入\n- **来源**: User Chat / WebUI / CLI\n- **载荷**: 自然语言目标、附件图片、代码片段\n- **机制**: 支持双向流式 SSE 与打断指令",
-      "x": 80,
-      "y": 0,
+      "text": "### 1. 用户端意图输入\n- **终端渠道**: WebUI / Chat 交互 / CLI 终端\n- **请求载荷**: 自然语言指令、附件、代码文件\n- **通信协议**: 支持双向流式 SSE 与打断指令",
+      "x": 100,
+      "y": 45,
       "width": 460,
-      "height": 190,
+      "height": 185,
       "color": "4"
     },
     {
       "id": "n_gateway",
       "type": "text",
-      "text": "### 2. 11_sdk_api 网关中枢\n- **协议**: REST / WebSocket / SSE 协议分发\n- **安全**: JWT 鉴权、Rate Limiting 频控\n- **路由**: 会话寻址与跨域网关代理",
-      "x": 620,
-      "y": 0,
+      "text": "### 2. 11_sdk_api 网关中枢\n- **接入管理**: REST / WebSocket / SSE 分发\n- **安全防护**: JWT 身份鉴权、API Rate Limit 频控\n- **路由控制**: 会话状态寻址、跨域代理转发",
+      "x": 690,
+      "y": 45,
       "width": 460,
-      "height": 190,
+      "height": 185,
       "color": "4"
     },
     {
       "id": "n_intent",
       "type": "text",
-      "text": "### 3. 09_workitem 意图立项\n- **实体**: 生成 `UserIntentRecord`\n- **生命周期**: 分配全局唯一 `WorkItemId`\n- **契约**: 绑定履约目标与执行时效规则",
-      "x": 1160,
-      "y": 0,
+      "text": "### 3. 09_workitem 意图立项\n- **实体生成**: 自然语言解析生成 `UserIntentRecord`\n- **全局标识**: 绑定长任务唯一 `WorkItemId`\n- **履约契约**: 绑定多租户隔离与时效协议",
+      "x": 1280,
+      "y": 45,
       "width": 460,
-      "height": 190,
+      "height": 185,
       "color": "4"
+    },
+    {
+      "id": "grp_2",
+      "type": "group",
+      "label": "【第二层：智能体内核中枢层】 ReAct Core, Context & Workitem",
+      "x": 60,
+      "y": 320,
+      "width": 1720,
+      "height": 290,
+      "color": "3"
     },
     {
       "id": "n_core",
       "type": "text",
-      "text": "### 🎯 01_core: ReAct 核心推理中枢\n- **状态机**: Think -> Act -> Observe 闭环驱动\n- **打断感知**: 实时监听用户终止并安全回滚状态\n- **容灾熔断**: 规避死循环调用，步数超限主动自省\n- **调度引擎**: 统一动作分发与结果收集",
-      "x": 80,
-      "y": 280,
+      "text": "### 🎯 01_core: ReAct 核心推理中枢\n- **状态机闭环**: Think ➔ Act ➔ Observe 循环心跳\n- **用户打断**: 毫秒级感知中断信号，安全回滚状态\n- **死循环拦截**: 步数超限自省反思，避免无效调用\n- **统一调度**: 动作调度器 (Action Dispatcher)",
+      "x": 100,
+      "y": 365,
       "width": 460,
-      "height": 240,
+      "height": 215,
       "color": "3"
     },
     {
       "id": "n_context",
       "type": "text",
-      "text": "### 📦 02_context: 上下文工程装配\n- **Token 治理**: 动态滑动窗口计算与硬上限裁剪\n- **注意力注入**: Attention 气泡注入当前步骤包\n- **System Prompt**: 注入规则守则与动态时间戳\n- **压缩解耦**: 历史动作剪枝与跨轮次摘要提取",
-      "x": 620,
-      "y": 280,
+      "text": "### 📦 02_context: 动态上下文装配\n- **Token 治理**: 动态滑动窗口计算与硬上限裁剪\n- **注意力包**: Attention 气泡注入当前步骤专注点\n- **规则注入**: System Rules 注入与版本控制\n- **去重摘要**: 历史对话精简，保留关键上下文拓扑",
+      "x": 690,
+      "y": 365,
       "width": 460,
-      "height": 240,
+      "height": 215,
       "color": "3"
     },
     {
       "id": "n_checklist",
       "type": "text",
-      "text": "### 🛡️ 09_workitem: 履约检查单与证据链\n- **步骤拆解**: `ChecklistRecord` 动态阶段拆解\n- **客观凭证**: `WorkEvidenceRecord` 挂载执行结果\n- **【防胡说门禁】**: 无凭证直接拦截“假装完成”\n- **动作流水**: `ActionEventRecord` 保证全链路可审计",
-      "x": 1160,
-      "y": 280,
+      "text": "### 🛡️ 09_workitem: 履约检查单与证据链\n- **步骤拆解**: `ChecklistRecord` 动态阶段分解\n- **客观凭证**: `WorkEvidenceRecord` 挂载执行结果\n- **【防胡说门禁】**: 无凭证严禁回复“任务已完成”\n- **全链路回放**: `ActionEventRecord` 动作流水审计",
+      "x": 1280,
+      "y": 365,
       "width": 460,
-      "height": 240,
+      "height": 215,
       "color": "3"
+    },
+    {
+      "id": "grp_3",
+      "type": "group",
+      "label": "【第三层：驱动与工具治理层】 LLM Providers, Tools & Subagents",
+      "x": 60,
+      "y": 670,
+      "width": 1720,
+      "height": 280,
+      "color": "5"
     },
     {
       "id": "n_llm",
       "type": "text",
-      "text": "### 🧠 03_llm: 大模型适配与推理驱动\n- **多源路由**: 火山引擎 (Doubao) / OpenAI / DeepSeek\n- **结构化输出**: Function Calling 参数精准反序列化\n- **流式响应**: Token 实时下推与推理延迟统计\n- **高可用容灾**: 超时自动重试、备用模型无缝切换",
-      "x": 80,
-      "y": 610,
+      "text": "### 🧠 03_llm: 大模型适配与推理驱动\n- **多模型路由**: 火山引擎 (Doubao) / OpenAI / DeepSeek\n- **结构化解析**: Function Calling 参数校验反序列化\n- **实时流式**: Token 增量透传与耗时指标采集\n- **降级容灾**: 响应超时自动重试与备用线路切换",
+      "x": 100,
+      "y": 715,
       "width": 460,
-      "height": 240,
+      "height": 205,
       "color": "5"
     },
     {
       "id": "n_tools",
       "type": "text",
-      "text": "### 🔧 04_tools & 10_skills: 工具与技能治理\n- **动态装载**: `LoadSkillTool` 按需激活专业技能\n- **沙箱隔离**: 拦截危险操作与越权访问\n- **强类型校验**: Pydantic / Schema 入参前置把关\n- **熔断回退**: 执行超时与异常错误友好包裹",
-      "x": 620,
-      "y": 610,
+      "text": "### 🔧 04_tools & 10_skills: 工具与技能治理\n- **动态装载**: `LoadSkillTool` 按需激活领域技能\n- **沙箱隔离**: 拦截危险指令与越权敏感操作\n- **强类型校验**: Pydantic / JSON Schema 入参把关\n- **错误兜底**: 执行超时保护与异常结构化封装",
+      "x": 690,
+      "y": 715,
       "width": 460,
-      "height": 240,
+      "height": 205,
       "color": "5"
     },
     {
       "id": "n_subagent",
       "type": "text",
-      "text": "### 👥 08_subagent: 多 Agent 协同网络\n- **隔离沙箱**: 子智能体独占上下文，避免污染主轮次\n- **Swarm/Mesh**: 异步并发分工 (Researcher / Coder)\n- **协同汇报**: 专职验收并向上层提交结构化总结\n- **资源控制**: 最大派生深度与 Token 配额强约束",
-      "x": 1160,
-      "y": 610,
+      "text": "### 👥 08_subagent: 多 Agent 协同网络\n- **独立沙箱**: 子智能体独立上下文，防主会话污染\n- **Swarm/Mesh**: 异步并发协作 (专职 Researcher/Coder)\n- **专职验收**: Coordinator 阶段把关与结构化汇报\n- **配额管控**: 最大派生深度与 Token 预算限制",
+      "x": 1280,
+      "y": 715,
       "width": 460,
-      "height": 240,
+      "height": 205,
       "color": "5"
+    },
+    {
+      "id": "grp_4",
+      "type": "group",
+      "label": "【第四层：并发运行时与高可用消息底座】 Storage, Concurrency & Outbox",
+      "x": 60,
+      "y": 1010,
+      "width": 1720,
+      "height": 290,
+      "color": "2"
     },
     {
       "id": "n_memory",
       "type": "text",
-      "text": "### 💾 05_memory & 07_dream: 状态与睡梦蒸馏\n- **L1 Working Memory**: 会话内内存高速当前态\n- **07_dream 异步沉淀**: 闲时蒸馏修剪长期知识经验\n- **向量存储**: 知识库 Embedding 与 RAG 检索\n- **状态快照**: 支持断点恢复与任务持久化",
-      "x": 80,
-      "y": 940,
+      "text": "### 💾 05_memory & 07_dream: 状态与睡梦蒸馏\n- **L1 Working Memory**: 会话内内存高速当前态\n- **07_dream 异步沉淀**: 闲时蒸馏长期经验与修剪无用轮次\n- **语义向量存储**: 知识库 Embedding 与 RAG 召回\n- **状态快照**: 支持断点恢复与任务持久化",
+      "x": 100,
+      "y": 1055,
       "width": 460,
-      "height": 240,
+      "height": 215,
       "color": "2"
     },
     {
       "id": "n_runtime",
       "type": "text",
-      "text": "### ⚡ 06_runtime: 高并发调度与排他锁\n- **分布式排他锁**: Redis Lock 租约 + Watchdog 自动续期\n- **高并发池**: Goroutine / Async Worker 线程池限流\n- **优雅停机**: SIGTERM 信号捕获与现场保存\n- **可观测性**: Prometheus 吞吐/延迟指标采集",
-      "x": 620,
-      "y": 940,
+      "text": "### ⚡ 06_runtime: 高并发调度与排他锁\n- **分布式排他锁**: Redis Lock 租约 + Watchdog 自动续期\n- **并发限流池**: Goroutine / Async Worker 线程池\n- **优雅停机**: SIGTERM 信号捕获与未决任务现场保存\n- **链路可观测**: Prometheus 吞吐/延迟与全链路 Trace",
+      "x": 690,
+      "y": 1055,
       "width": 460,
-      "height": 240,
+      "height": 215,
       "color": "2"
     },
     {
       "id": "n_outbox",
       "type": "text",
-      "text": "### 🚀 15 消息总线: 事务发件箱模式 (Outbox)\n- **痛点根治**: 坚决弃用双写不一致的 Redis+Kafka 双跳方案\n- **本地 ACID**: PostgreSQL 事务内原子写入业务与发件箱表\n- **Debezium CDC**: 基于 WAL 日志极速抽取变更，零漏单\n- **Kafka 投递**: 单分区有序消费 + 幂等 Key + 死信重试",
-      "x": 1160,
-      "y": 940,
+      "text": "### 🚀 15 消息总线: 事务发件箱模式 (Outbox)\n- **痛点根治**: 坚决弃用双写不一致的 Redis+Kafka 双跳\n- **本地 ACID 事务**: PostgreSQL 原子写入业务与发件箱表\n- **Debezium CDC**: 基于 WAL 日志极速无锁抽取变更\n- **Kafka 消息投递**: 单分区严格保序 + 幂等 Key + 死信重试",
+      "x": 1280,
+      "y": 1055,
       "width": 460,
-      "height": 240,
+      "height": 215,
       "color": "1"
     }
   ],
   "edges": [
     {
-      "id": "e1",
+      "id": "e_l1_1",
       "fromNode": "n_user",
       "fromSide": "right",
       "toNode": "n_gateway",
       "toSide": "left",
-      "label": "HTTP / WS"
+      "label": "双向通信"
     },
     {
-      "id": "e2",
+      "id": "e_l1_2",
       "fromNode": "n_gateway",
       "fromSide": "right",
       "toNode": "n_intent",
       "toSide": "left",
-      "label": "解析并立项"
+      "label": "意图立项"
     },
     {
-      "id": "e3",
+      "id": "e_l1_to_l2",
       "fromNode": "n_intent",
       "fromSide": "bottom",
       "toNode": "n_checklist",
       "toSide": "top",
-      "label": "长任务拆解绑定"
+      "label": "下发长任务步骤"
     },
     {
-      "id": "e4",
+      "id": "e_l2_1",
       "fromNode": "n_core",
       "fromSide": "right",
       "toNode": "n_context",
@@ -165,15 +205,15 @@
       "label": "组装 Prompt"
     },
     {
-      "id": "e5",
+      "id": "e_l2_2",
       "fromNode": "n_checklist",
       "fromSide": "left",
       "toNode": "n_context",
       "toSide": "right",
-      "label": "注入注意力包"
+      "label": "注入当前步骤"
     },
     {
-      "id": "e6",
+      "id": "e_l2_to_l3_col1",
       "fromNode": "n_core",
       "fromSide": "bottom",
       "toNode": "n_llm",
@@ -181,44 +221,44 @@
       "label": "发起模型推理"
     },
     {
-      "id": "e7",
-      "fromNode": "n_core",
+      "id": "e_l2_to_l3_col2",
+      "fromNode": "n_context",
       "fromSide": "bottom",
       "toNode": "n_tools",
       "toSide": "top",
-      "label": "调度工具沙箱执行"
+      "label": "调度工具执行"
     },
     {
-      "id": "e8",
+      "id": "e_l2_to_l3_col3",
       "fromNode": "n_checklist",
       "fromSide": "bottom",
       "toNode": "n_subagent",
       "toSide": "top",
-      "label": "派发独立子任务"
+      "label": "分派子智能体"
     },
     {
-      "id": "e9",
-      "fromNode": "n_core",
+      "id": "e_l3_to_l4_col1",
+      "fromNode": "n_llm",
       "fromSide": "bottom",
       "toNode": "n_memory",
       "toSide": "top",
-      "label": "读写会话状态"
+      "label": "持久化会话记忆"
     },
     {
-      "id": "e10",
-      "fromNode": "n_core",
+      "id": "e_l3_to_l4_col2",
+      "fromNode": "n_tools",
       "fromSide": "bottom",
       "toNode": "n_runtime",
       "toSide": "top",
-      "label": "抢占分布式锁"
+      "label": "申请排他锁与并发"
     },
     {
-      "id": "e11",
-      "fromNode": "n_core",
+      "id": "e_l3_to_l4_col3",
+      "fromNode": "n_subagent",
       "fromSide": "bottom",
       "toNode": "n_outbox",
       "toSide": "top",
-      "label": "原子写入发件箱"
+      "label": "写入事务发件箱"
     }
   ]
 }
