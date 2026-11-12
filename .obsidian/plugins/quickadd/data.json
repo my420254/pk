@@ -14,7 +14,7 @@
   "onePageInputEnabled": false,
   "disableOnlineFeatures": true,
   "enableUriCallbacks": false,
-  "enableRibbonIcon": false,
+  "enableRibbonIcon": true,
   "showCaptureNotification": true,
   "showInputCancellationNotification": false,
   "enableTemplatePropertyTypes": false,
