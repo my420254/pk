@@ -1,17 +1,24 @@
 {
-  "version": 3,
-  "defaultView": "00_Home_知识库导航.md",
-  "workspace": "none",
-  "openOnStartup": true,
-  "openWhenEmpty": true,
-  "manualOpen": false,
-  "useMoment": false,
-  "momentFormat": "YYYY-MM-DD",
-  "autoCreate": false,
-  "autoScroll": false,
-  "pin": false,
-  "hideTitle": false,
-  "revertView": false,
-  "hasRibbonIcon": true,
-  "opened": true
+  "version": 5,
+  "homepages": {
+    "Main Homepage": {
+      "value": "00_Home_知识库导航.md",
+      "kind": "File",
+      "openOnStartup": true,
+      "openMode": "Replace all open notes",
+      "manualOpenMode": "Keep open notes",
+      "view": "Default view",
+      "revertView": true,
+      "openWhenEmpty": false,
+      "openOnNewTab": false,
+      "refreshDataview": false,
+      "autoCreate": false,
+      "autoScroll": false,
+      "pin": false,
+      "commands": [],
+      "alwaysApply": false,
+      "hideReleaseNotes": false
+    }
+  },
+  "separateMobile": false
 }
