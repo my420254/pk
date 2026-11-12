@@ -5,9 +5,10 @@
 > 本知识库已打通 Windows Obsidian 与 WSL2 终端环境，支持双向实时同步、Mermaid 架构渲染与 Git 版本备份。
 > 当前主干涵盖 **AI Agent 核心循环、上下文工程、高可用消息队列（Kafka/Redis）、Go 业务微服务、事务发件箱演进及大厂面试真题**。
 
-> [!NOTE] 🎨 **Excalidraw 交互式手绘白板现已就绪**
-> 👉 **点击直接打开手绘白板**：[[SimpleClaw_Agent整体架构手绘图.excalidraw|🎨 SimpleClaw Agent 核心全景架构图 (手绘风交互白板)]]
-> *(打开后是一个完整的彩色手绘架构大图，所有矩形模块、箭头、文字均可用鼠标自由拖拽、缩放和微调)*
+> [!NOTE] 🎨 **架构全景白板现已就绪**
+> 👉 **强烈推荐打开（Obsidian 官方原生现代白板）**：[[SimpleClaw_Agent架构全景.canvas|🌟 SimpleClaw Agent 核心全景架构图 (Canvas 现代白板)]]
+> 👉 **手绘风白板**：[[SimpleClaw_Agent整体架构手绘图.excalidraw|🎨 SimpleClaw Agent 手绘架构图 (Excalidraw)]]
+> *(点击 Canvas 白板即可获得现代卡片化排版，字迹清晰、连线整洁、支持无限缩放和鼠标拖拽)*
 
 ---
 
