@@ -1,0 +1,15 @@
+# Obsidian specific ignore
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+.obsidian/graph.json
+.obsidian/plugins/recent-files-obsidian/data.json
+.obsidian/plugins/omnisearch/data.json
+.trash/
+
+# Windows / OS metadata
+*.Zone.Identifier
+*.base
+desktop.ini
+Thumbs.db
+.DS_Store
