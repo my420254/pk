@@ -553,16 +553,20 @@ func main() {
 ### 运行输出结果一览
 
 ```
-=== 开始处理请求: user=zhangsan ===
-HTTP 200: 登录成功！
+=== 收到登录请求: user=zhangsan ===
+HTTP 200: {"code": 0, "msg": "登录成功"}
 
-=== 开始处理请求: user=zhangsan ===
-后台完整错误日志 -> [业务码:401] 账号或密码输入错误 (底层原因: 身份认证失败)
-HTTP 401: 提示前端 -> 账号或密码输入错误 (是否允许前端显示重试按钮: true)
+=== 收到登录请求: user=ghost ===
+time=2026-11-13T21:40:00.123+08:00 level=ERROR source=/path/to/main.go:154 msg=登录接口处理失败 username=ghost err="[Code:401] 账号或密码错误 (底层原因: 查询数据库表 users(username=ghost) 失败: 用户记录不存在)"
+HTTP 401: {"code": 401, "msg": "账号或密码错误", "retry_after": 0}
 
-=== 开始处理请求: user=ghost ===
-后台完整错误日志 -> 登录流程前置检查异常: 查询数据库表 users(username=ghost) 失败: 用户不存在
-HTTP 404: 提示前端 -> 该账号尚未注册
+=== 收到登录请求: user=zhangsan ===
+time=2026-11-13T21:40:00.124+08:00 level=ERROR source=/path/to/main.go:154 msg=登录接口处理失败 username=zhangsan err="[Code:429] 尝试次数过多，请稍后再试 (底层原因: 密码连续错误次数过多，账号已锁定)"
+HTTP 429: {"code": 429, "msg": "尝试次数过多，请稍后再试", "retry_after": 30}
+
+=== 收到登录请求: user=db_down ===
+time=2026-11-13T21:40:00.125+08:00 level=ERROR source=/path/to/main.go:154 msg=登录接口处理失败 username=db_down err="登录业务查询用户信息异常: 连接 MySQL 主库失败: connection refused"
+HTTP 500: {"code": 500, "msg": "系统繁忙，请稍后再试"}
 ```
 
 我们分三部分把你截图里的所有疑惑彻底拆开：
