@@ -366,136 +366,187 @@ return "不带底层原因的文字"
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"time"
 )
 
 // =====================================================================
-// 第一部分：定义哨兵错误（Sentinel Error）
-// 作用：作为全局预定义的“固定错误信号弹”，供上层使用 errors.Is 进行快速分类判断
+// 0. 全局日志初始化（通常放在项目启动的 main.go 里写一次）
+// 疑问解答：为什么不用 slog 直接代替 error？
+//   - error 是“刹车和方向盘”：负责中断程序流、往上传递业务状态，控制给前端回什么 JSON；
+//   - slog  是“行车记录仪”：负责把案发现场写进日志（给程序员看），它无法阻止代码继续往下跑。
 // =====================================================================
+func initLogger() {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true, // 开启后自动记录打印日志的文件路径和行号，VS Code 中可直接点击跳转！
+	}))
+	slog.SetDefault(logger)
+}
+
+// =====================================================================
+// 第一部分：定义全局错误载体（通常放在 internal/errs/errors.go 公共包里，供三层共用）
+// =====================================================================
+
+// 1. 哨兵错误（Sentinel Error）：使用标准库包 errors.New 创建
+// 适用场景：只需要知道“是不是这件事发生了”，不需要读取动态字段（配合 errors.Is 使用）
 var (
-	ErrUserNotFound = errors.New("用户不存在")
-	ErrAuthFailed   = errors.New("身份认证失败")
+	ErrUserNotFound   = errors.New("用户记录不存在") // 底层客观技术事实
+	ErrPasswordLocked = errors.New("密码连续错误次数过多，账号已锁定")
 )
 
-// =====================================================================
-// 第二部分：定义自定义错误结构体（携带丰富的业务现场字段）
-// =====================================================================
-type MyError struct {
-	Code      int    // 业务状态码（如 401 密码错误，403 账号锁定）
-	Msg       string // 给前端展示的友好提示语
-	Retryable bool   // 额外控制字段：告诉上层调用方是否允许重试
-	Err       error  // 内部包裹的底层原始错误（用于串联错误链）
+// 2. 自定义业务错误结构体（BizError）：携带动态业务字段（Code、Msg、动态参数等）
+// 适用场景：需要从错误里掏出动态字段（如状态码、提示语、剩余等待秒数）给前端（配合 errors.As 使用）
+type BizError struct {
+	Code       int    // 业务/HTTP 状态码（如 401 认证失败，429 限流）
+	Msg        string // 给前端展示的友好安全提示语
+	RetryAfter int    // 动态字段示例：告诉前端多少秒后允许重试（哨兵错误无法携带这种动态值）
+	Err        error  // 内部包裹的底层原始错误（用于串联错误链）
 }
 
-// 1. 实现 Go 内置 error 接口的唯一要求：Error() string
-// 参数与接收者解析：
-//   (e *MyError) -> 必须使用指针接收者 *MyError！
-//                   原因1：确保每个错误实例拥有独立内存地址，避免字段值相同的两个错误误判相等；
-//                   原因2：与下面 return &MyError{...} 的指针类型保持严格一致。
-//   string       -> 接口死板规定的返回值类型，必须返回一串文本描述。
-func (e *MyError) Error() string {
-	// 使用 fmt.Sprintf 把结构体里零散的 int、string 字段拼接成一句完整的 string 返回
+// 实现 Go 内置 error 接口的唯一要求：Error() string
+// 注意：必须使用指针接收者 (e *BizError)，保证每个错误实例地址独立且与返回指针一致
+func (e *BizError) Error() string {
 	if e.Err != nil {
-		return fmt.Sprintf("[业务码:%d] %s (底层原因: %v)", e.Code, e.Msg, e.Err)
+		return fmt.Sprintf("[Code:%d] %s (底层原因: %v)", e.Code, e.Msg, e.Err)
 	}
-	return fmt.Sprintf("[业务码:%d] %s", e.Code, e.Msg)
+	return fmt.Sprintf("[Code:%d] %s", e.Code, e.Msg)
 }
 
-// 2. 实现 Unwrap() error 方法（错误链剥洋葱的关键！）
-// 意义：当标准库的 errors.Is 或 errors.As 顺着错误链往下排查时，会自动调用 Unwrap() 取出内部包裹的 Err
-func (e *MyError) Unwrap() error {
+// 实现 Unwrap() error：当 errors.Is / errors.As 顺着套娃往下查时，自动调用此方法剥开外壳
+func (e *BizError) Unwrap() error {
 	return e.Err
 }
 
 // =====================================================================
-// 第三部分：模拟底层数据仓储层（Repo 层）
+// 第二部分：底层数据层（Repo 层）
+// 职责：只管数据库/Redis读写，只报告“客观技术事实”，绝对不自作主张拼接前端提示语！
+//       （因为 Repo 不知道调它的是“登录接口”还是“新用户注册查重接口”）
 // =====================================================================
-func queryUserFromDB(username string) error {
-	if username == "ghost" {
-		// 使用 fmt.Errorf + %w 包装哨兵错误，附带现场参数 username
-		// 注意：必须是 %w 才能保留错误链！写 %v 会导致错误链断裂
-		return fmt.Errorf("查询数据库表 users(username=%s) 失败: %w", username, ErrUserNotFound)
+func queryUserFromDB(ctx context.Context, username string) (string, error) {
+	// 模拟超时检查（实际开发中 db.QueryContext(ctx, ...) 底层会自动监听 ctx.Done()）
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("查询用户前上下文已取消: %w", ctx.Err())
 	}
-	return nil
+
+	if username == "ghost" {
+		// 为什么用 fmt.Errorf + %w 而不用 errors.New？
+		// 1. errors.New 只能写死字符串，塞不进动态变量 username；
+		// 2. %w (Wrap) 能把哨兵错误 ErrUserNotFound 裹进错误链，保留完整线索供上层排查。
+		return "", fmt.Errorf("查询数据库表 users(username=%s) 失败: %w", username, ErrUserNotFound)
+	}
+
+	if username == "db_down" {
+		// 模拟未预料到的数据库断网等底层系统故障
+		return "", fmt.Errorf("连接 MySQL 主库失败: connection refused")
+	}
+
+	// 正常查到用户，返回数据库里存的正确密码
+	return "123456", nil
 }
 
 // =====================================================================
-// 第四部分：模拟核心业务层（Service 层）
-// 【绝对铁律】：函数签名返回值必须写死为 error 接口，严禁写成 *MyError！
+// 第三部分：核心业务层（Service 层）
+// 职责：业务编排与“业务判决中心”！
+//       只有 Service 知道当前在办什么业务，也只有它有资格拍板生成给前端看的 BizError。
+// 【铁律】：函数签名返回值必须是 error 接口（双格盲盒），严禁写成 *BizError（防 Typed Nil 陷阱）！
 // =====================================================================
-func login(username, password string) error {
-	// 步骤 1：先查用户是否存在（接收数据库层返回的 error）
-	if err := queryUserFromDB(username); err != nil {
-		// 继续用 %w 向上包装一层业务上下文，形成“俄罗斯套娃”错误链
-		return fmt.Errorf("登录流程前置检查异常: %w", err)
+func loginService(ctx context.Context, username, password string) error {
+	// 1. 调用 Repo 层查用户
+	dbPassword, err := queryUserFromDB(ctx, username)
+	if err != nil {
+		// 生产环境安全规范（防账号枚举/撞库）：
+		// 哪怕底层查库发现“用户不存在”，在登录业务里也不应暴露“该账号未注册”，
+		// 而是由 Service 拍板，统一包装成与密码错误完全一致的 401 业务错误！
+		if errors.Is(err, ErrUserNotFound) {
+			return &BizError{
+				Code:       401,
+				Msg:        "账号或密码错误",
+				RetryAfter: 0,
+				Err:        err, // 继续把底层错误链挂在里面，方便后端日志追溯真因
+			}
+		}
+
+		// 其他未知错误（如数据库断网），原样用 %w 贴上业务层标签往上传，最终会落入 Handler 的 500 兜底
+		return fmt.Errorf("登录业务查询用户信息异常: %w", err)
 	}
 
-	// 步骤 2：校验密码，如果失败，返回自定义的 *MyError 结构体指针
-	if password != "123456" {
-		// 这里加取地址符 &，是因为只有 *MyError 指针才实现了 Error() string 方法
-		// 返回时，Go 自动把 *MyError 装进 error 接口盲盒：[第1格: *MyError | 第2格: 0xc000...]
-		return &MyError{
-			Code:      401,
-			Msg:       "账号或密码输入错误",
-			Retryable: true,
-			Err:       ErrAuthFailed, // 把哨兵错误也包进去，这样上层既能用 errors.Is 也能用 errors.As！
+	// 2. 校验密码规则（假设模拟触发了频控限制，需要带出动态秒数 RetryAfter）
+	if password == "brute_force" {
+		return &BizError{
+			Code:       429,
+			Msg:        "尝试次数过多，请稍后再试",
+			RetryAfter: 30, // 动态字段：必须用自定义结构体 + errors.As 才能提取出来
+			Err:        ErrPasswordLocked,
 		}
 	}
 
-	// 步骤 3：一切正常，返回 nil
-	// 因为当前函数签名返回值是 error 接口，这里的 nil 会生成真正的“双空”盲盒：
-	// [第1格(真实类型): nil | 第2格(真实地址): nil]
-	// 外层判断 if err != nil 时就会精准判定为 false（无错误），彻底规避 Typed Nil 陷阱！
+	if password != dbPassword {
+		return &BizError{
+			Code:       401,
+			Msg:        "账号或密码错误",
+			RetryAfter: 0,
+		}
+	}
+
 	return nil
 }
 
 // =====================================================================
-// 第五部分：模拟最外层接口控制层（Handler 层）—— 统一拦截并拆解错误链
+// 第四部分：最外层接口控制层（Handler 层）
+// 职责：只干“门口保安”的活——1.校验请求格式；2.转交 Service；3.统一记录日志并打包返回 HTTP 响应。
+//       不插手多表业务逻辑，也不需要穷举所有可能发生的系统崩溃（靠 default 兜底）。
 // =====================================================================
 func handleLoginRequest(username, password string) {
-	fmt.Printf("=== 开始处理请求: user=%s ===\n", username)
+	fmt.Printf("=== 收到登录请求: user=%s ===\n", username)
 
-	// 声明通用 error 接口变量（双格盲盒），接住 login 返回的任何错误
-	err := login(username, password)
+	// 创建带 3 秒超时控制的上下文（在 Gin 框架中根上下文直接用 c.Request.Context()）
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// 调用业务层
+	err := loginService(ctx, username, password)
 	if err == nil {
-		fmt.Println("HTTP 200: 登录成功！\n")
+		fmt.Println("HTTP 200: {\"code\": 0, \"msg\": \"登录成功\"}\n")
 		return
 	}
 
-	// 1. 打印完整错误链日志（用于运维排查，能看到每一层 %w 拼接的完整案发现场）
-	fmt.Println("后台完整错误日志 ->", err.Error())
+	// 统一错误响应处理（真实项目中这段逻辑会抽成全项目共用的 httpx.HandleError(c, err) 函数）
+	// 1. 【给程序员看】：用 slog 记录唯一一条完整错误日志（自带文件行号 + 全链路 %w 案发轨迹）
+	slog.Error("登录接口处理失败", "username", username, "err", err)
 
-	// 2. 使用 errors.Is 判断错误链最深处是否包含“用户不存在”哨兵错误
-	if errors.Is(err, ErrUserNotFound) {
-		fmt.Println("HTTP 404: 提示前端 -> 该账号尚未注册\n")
+	// 2. 【给程序分流 & 给前端看】：
+	// 使用 errors.As 一步完成“判断是否为 BizError + 提取内部动态字段”
+	// 哪怕全项目有 100 种业务错误码，这里也只需写这一次 errors.As！
+	var bizErr *BizError
+	if errors.As(err, &bizErr) {
+		fmt.Printf("HTTP %d: {\"code\": %d, \"msg\": \"%s\", \"retry_after\": %d}\n\n",
+			bizErr.Code, bizErr.Code, bizErr.Msg, bizErr.RetryAfter)
 		return
 	}
 
-	// 3. 使用 errors.As 从错误链中“提取”出自定义的 *MyError 结构体，读取里面的字段！
-	// 注意：必须先声明一个目标类型的空指针变量，再把它的地址 (&myErr) 传给 errors.As
-	var myErr *MyError
-	if errors.As(err, &myErr) {
-		// 提取成功！现在可以自由访问 MyError 里的 Code、Msg、Retryable 字段了
-		fmt.Printf("HTTP %d: 提示前端 -> %s (是否允许前端显示重试按钮: %v)\n\n",
-			myErr.Code, myErr.Msg, myErr.Retryable)
-		return
-	}
-
-	// 4. 兜底分支：既不是 404 也不是已知业务错误，说明是未预料的系统崩溃（如断网）
-	fmt.Println("HTTP 500: 提示前端 -> 服务器开小差了，请稍后再试\n")
+	// 3. 【核心兜底】：所有未预料到的系统级故障（断网、OOM、SQL崩溃等）全掉进这里！
+	// 绝不把底层敏感报错泄露给前端，统一返回 500
+	fmt.Println("HTTP 500: {\"code\": 500, \"msg\": \"系统繁忙，请稍后再试\"}\n")
 }
 
 func main() {
-	// 测试场景 1：正常登录（返回双空 nil，顺利通过）
+	initLogger()
+
+	// 场景 1：正常登录 -> HTTP 200
 	handleLoginRequest("zhangsan", "123456")
 
-	// 测试场景 2：密码错误（触发 *MyError，被 errors.As 精准提取出 Code=401 和 Retryable=true）
-	handleLoginRequest("zhangsan", "000000")
-
-	// 测试场景 3：用户不存在（经过两层 %w 包装，依然被 errors.Is 精准识别出 ErrUserNotFound 返回 404）
+	// 场景 2：用户不存在 -> 底层报 ErrUserNotFound，Service 统一转为 401 防撞库（日志里仍能看到真因！）
 	handleLoginRequest("ghost", "123456")
+
+	// 场景 3：密码错误触发频控 -> 提取出动态字段 RetryAfter=30 返回 429
+	handleLoginRequest("zhangsan", "brute_force")
+
+	// 场景 4：数据库断网 -> 无需提前预知，自动落入 500 兜底，slog 打印完整案发现场与行号
+	handleLoginRequest("db_down", "123456")
 }
 ```
 
