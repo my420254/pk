@@ -605,8 +605,6 @@ func StartBackgroundWorker(ctx context.Context) {
 
 #### 2. 必须死记的 5 条终端命令
 
-Bash
-
 ```
 # 1. 初始化项目模块（新建项目时在根目录只敲一次，名字通常是仓库路径）
 go mod init github.com/yourname/project
@@ -625,8 +623,6 @@ go test -race ./...
 ```
 
 #### 3. 中小型后端项目标准目录结构（行业死板写法）
-
-Plaintext
 
 ```
 project/
@@ -655,11 +651,7 @@ project/
 
 在 Go 1.18 之前，如果你想写一个“判断切片里是否包含某个元素”的函数，因为 `[]int` 和 `[]string` 类型不同，你必须写两遍逻辑一模一样的函数（`ContainsInt`、`ContainsString`）。泛型允许你**把“类型”也当成参数传进去**，写一次通吃所有类型。
 
-
-
 #### 2. 泛型死板公式与完整解析
-
-Go
 
 ```
 package util
@@ -722,11 +714,7 @@ type Result[T any] struct {
 
 在真实后端里，最忌讳底层一出错就只返回 `errors.New("出错了")`——上层根本不知道这是“数据库没查到（该返回 404）”，还是“数据库断网了（该返回 500 报警）”。
 
-
-
 #### 1. 哨兵错误（Sentinel Error）+ `%w` 错误包装 + `errors.Is`
-
-Go
 
 ```
 package repo
@@ -771,8 +759,6 @@ func checkUser(ctx context.Context, r UserRepository, id int64) {
 ```
 
 #### 2. 自定义结构化错误类型（携带业务错误码）+ `errors.As`
-
-Go
 
 ```
 // 当错误不仅需要文字，还需要携带 HTTP 状态码、业务码等额外字段时，定义错误结构体
@@ -821,8 +807,6 @@ func handleAppError(err error) {
 - **中文字符占 3 个字节（UTF-8）**：直接按索引 `s[i]` 取到的是单个字节（中文会乱码）；用 `for _, r := range s` 遍历拿到的 `r` 是 `rune` 类型（代表一个完整的 Unicode 字符）。
 
 #### 2. 常用转换与拼接标准代码
-
-Go
 
 ```
 package main
@@ -876,10 +860,6 @@ func stringAndByteDemo() {
 ### 五、 HTTP 服务端完整骨架（路由、中间件、优雅退出）
 
 前面学了用 `http.Get` 当客户端去请求别人，现在学用 `http.Server` 当服务端接收前端请求。下面这段代码包含了**生产环境必须具备的超时防护、Panic 恢复中间件、请求级 Context 传递、以及信号优雅停机（Graceful Shutdown）**。
-
-
-
-Go
 
 ```
 package main
