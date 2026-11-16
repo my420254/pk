@@ -1,4 +1,444 @@
+先直接回答你最后那句核心追问：
 
+**对！通道（`channel`）`close()` 之后，消费者完全可以继续从里面取数据！**
+
+
+
+- **底层规则（面试必背）**：关闭一个带缓冲的通道时，通道里**已经塞进去还没被取走的残留数据，绝对不会丢失**。消费者依然可以把它们一个一个全读出来；等缓冲区里的残留数据彻底被掏空后，再继续读这个已关闭的通道，**不会阻塞，也不会报错**，而是瞬间返回对应数据类型的**零值**（同时第二个布尔返回值 `ok` 变为 `false`）。`for range` 正是检测到这个结束标志才自动优雅退出循环的。（注意：**绝对不能往已关闭的通道写数据，也不能重复 `close` 同一个通道，否则直接 `panic`**！）
+
+下面是将你前面所有的追问、底层原理、设计者视角和带保姆级注释的完整可运行代码深度融合后的**终极复习指南**：
+
+
+
+# Go 并发编程与核心机制完全指南（秋招终极精编版）
+
+## 第一章：协程（Goroutine）的创建与安全控制
+
+### 1. 创建协程的 3 种基本写法与防崩溃包装
+
+Go 中启动协程的唯一关键字是 `go`，后跟函数调用。
+
+- **为什么要用 `GoSafe` 包裹 `fn()`，而不是在每个 `fn()` 内部自己写 `defer recover()`？**
+  1. **代码复用（DRY 原则）**：后端项目有几十个异步任务（发邮件、写日志、同步数据），每个函数里都写一遍 `recover` 样板代码极易遗漏；只要漏 1 处，线上整个进程就会因为这 1 个子协程的 `panic` 直接崩溃。
+  2. **适配第三方函数**：无法修改第三方库函数内部代码，只能在外层用 `GoSafe` 套一层安全壳启动（只要在当前协程最外层匿名函数注册了 `defer recover()`，里面无论嵌套调用多少层函数，发生 `panic` 时栈展开都会一路退回到最外层被成功拦截）。
+
+```
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func worker(id int) {
+	fmt.Printf("命名函数协程正在执行，ID: %d\n", id)
+}
+
+// GoSafe 生产环境标配：防崩溃安全启动包装器
+func GoSafe(fn func()) {
+	go func() {
+		// 铁律 1：recover() 必须直接写在当前子协程的 defer 匿名函数中才能生效
+		// 铁律 2：Go 协程之间是隔离的，父协程的 recover() 绝对抓不住子协程的 panic
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("[告警] 捕获到子协程 panic，已拦截防止进程崩溃: %v\n", r)
+			}
+		}()
+		fn() // 执行真正的业务逻辑
+	}()
+}
+
+func main() {
+	// 方式 1：匿名函数（闭包）直接启动（注意末尾必须有 () 调用）
+	// 坑点避雷：循环中启动协程，务必通过参数值拷贝传参，避免并发读取同一个外部变量
+	for i := 0; i < 3; i++ {
+		go func(taskID int) {
+			fmt.Printf("匿名闭包协程执行: %d\n", taskID)
+		}(i) // 把当前的 i 值拷贝一份传给 taskID
+	}
+
+	// 方式 2：调用命名函数（若函数有返回值，go 调用会直接丢弃返回值）
+	go worker(100)
+
+	// 方式 3：安全启动（哪怕内部发生数组越界、空指针 panic，也不会拖垮主进程）
+	GoSafe(func() {
+		panic("模拟数据库连接空指针异常")
+	})
+
+	time.Sleep(500 * time.Millisecond) // 简单等待演示（生产中用 WaitGroup）
+}
+```
+
+### 2. `defer` 与返回值的执行顺序（高频面试坑点）
+
+- **底层本质**：`return x` 不是原子操作，在底层被拆分为三步：
+  1. **先把 `x` 的值拷贝进栈上的【返回值专属格子】（固定死）**；
+  2. **按后进先出（LIFO）顺序执行 `defer` 栈**；
+  3. **执行 `RET` 指令把【返回值格子】里的内容交给调用者**。
+
+```
+// 1. 匿名返回值：defer 既不报错，也改不了返回值（最终返回 10）
+func testAnonymous() int {
+	x := 10
+	defer func() {
+		x = 20 // 闭包合法修改局部变量 x，但第一步时 10 已经拷进【返回值格子】固定死了！
+	}()
+	return x // 返回 10
+}
+
+// 2. 命名返回值：defer 可以修改返回值（最终返回 20）
+func testNamed() (res int) { // 提前给返回值起名 res，【返回值格子】直接绑定变量 res 本身
+	res = 10
+	defer func() {
+		res = 20 // 直接改的是返回值格子里的数！
+	}()
+	return res // 返回 20
+}
+```
+
+## 第二章：`sync` 包核心同步原语与底层原理
+
+### 1. `sync.WaitGroup`（等待一批协程全部干完活）
+
+- **底层原理**：内部维护一个 64 位整数（高 32 位存 `counter` 计数器，低 32 位存 `waiter` 等待者数量）和一个信号量 `sema`。
+- **两大死穴**：① `wg.Add(1)` 必须写在 `go func()` **外面**（防主协程提前穿透 `Wait()`）；② 跨函数传递必须传**指针 `\*sync.WaitGroup`**（值拷贝会导致副本计数器永远不为 0，引发死锁）。
+
+```
+func demoWaitGroup() {
+	var wg sync.WaitGroup
+
+	for i := 1; i <= 3; i++ {
+		wg.Add(1) // 1. 必须在起协程前加 1
+		go func(id int) {
+			defer wg.Done() // 2. 协程退出前减 1（等价于 Add(-1)），写在 defer 里防异常漏减
+			fmt.Printf("打工人 %d 完成任务\n", id)
+		}(i)
+	}
+
+	wg.Wait() // 3. 主协程在这里阻塞，直到计数器归 0 才放行
+	fmt.Println("所有打工人全部收工！")
+}
+```
+
+### 2. `sync.Mutex`（互斥锁）与 `sync.RWMutex`（读写锁）
+
+- **读锁 `RLock()` vs 写锁 `Lock()`**：读锁共享（多个只读协程可同时持有读锁，适合读多写少）；写锁排他（一旦加写锁，阻塞所有其他读锁和写锁）。
+- **底层高频八股（自旋、正常模式 vs 饥饿模式）**：
+  - **自旋（Spinning）**：协程发现锁被占时，不立刻挂起休眠（省去上下文切换开销），而是原地执行几轮 CPU 空转指令赌锁马上释放。
+  - **正常模式（追求最高吞吐量）**：锁释放时唤醒队头老协程，但此时刚到来的、正在 CPU 上跑的新协程会直接自旋抢锁，且**大概率抢赢刚醒来的老协程**。吞吐量高，但可能导致队头老协程被“饿死”。
+  - **饥饿模式（保证绝对公平，1ms 阈值）**：一旦队头老协程等待超过 **1ms**，锁切换为饥饿模式。此时**禁止任何新协程自旋**，锁释放时直接移交给队头老协程；直到老协程拿到锁且发现自己是队列里最后一个等待者（或等待小于 1ms），才切回正常模式。
+  - **不可重入性**：Go 的 `Mutex` 不记录持有者协程 ID，同一协程连续调用两次 `Lock()` 会直接死锁崩溃（设计者以此倒逼开发者拆解混乱的锁粒度）。
+
+### 3. `sync.Once` 与 DCL（双重检查锁）
+
+- **核心作用**：保证某个初始化函数全局**绝对只执行一次**。
+- **`done` 标志位含义**：`done` 不是“是否上锁”，而是“初始化任务是否已经执行完毕”（`0` = 未执行，`1` = 已执行）。
+- **为什么要查两次 `done == 0`（Double-Checked Locking）？**
+  1. **第一关（无锁原子读）**：`atomic.LoadUint32(&o.done) == 0`，若已为 `1`，99.99% 的后续请求直接无锁快速返回；
+  2. **第二关（加锁后二次读）**：假设协程 A 和 B 同时通过第一关去抢互斥锁，A 抢到锁执行完初始化并把 `done` 置为 `1` 后释放锁；B 随后抢到锁进门，**必须再查一次 `o.done == 0`**，发现已经是 `1` 了直接退出，防止重复初始化。
+
+### 4. `sync.Map` 与 `sync.Pool`（底层细节与踩坑）
+
+- **`sync.Map`**：内部维护 `read`（只读 map，原子无锁访问）和 `dirty`（脏 map，加锁访问）。读多写少或无 key 冲突时性能极高；频繁写入新 key 时性能不如 `RWMutex + 原生 map`。
+- **`sync.Pool`（临时对象池）**：
+  - **结构设计**：为 GMP 模型中的每个 **P（逻辑处理器）** 分配一个私有槽位 `private`（同一时刻 P 上只跑 1 个协程，**完全无锁读写**）和一个本地双向链表 `shared`（其他 P 可能来偷取，使用 **CAS 硬件原子指令**访问，即 CPU 级别的 `Compare-And-Swap(地址, 预期旧值, 新值)`，无需操作系统线程挂起）。
+  - **核心考点（禁止存有状态资源）**：每次 **GC（垃圾回收）发生时，`sync.Pool` 里的所有对象都会被无条件清空**！因此只能存无状态的临时内存（如 `bytes.Buffer`），**绝对不能存数据库连接等有状态资源**（否则 GC 清空引用后，底层 TCP 连接未 `Close()` 会直接泄漏把数据库撑爆；有状态连接必须用 `database/sql` 等专用连接池管理）。
+
+## 第三章：Go 后端四大高频设计模式（混合使用场景）
+
+实际项目中往往是多种模式组合：**单例模式**管全局唯一连接池，**选项模式**配初始化参数，**工厂模式**实例化多渠道客户端，**生产者-消费者模式**做异步削峰。
+
+```
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+// ==================== 1. 单例模式（Singleton） ====================
+// 场景：全局唯一的重型结构体（持有 TCP 连接池、文件句柄等底层资源），全程序只初始化一次
+type DBClient struct {
+	ConnStr string
+}
+
+var (
+	dbInstance *DBClient
+	dbOnce     sync.Once
+)
+
+func GetDBInstance() *DBClient {
+	// Do 接收一个无参函数 func()，由 sync.Once 保证并发下绝对只执行 1 次
+	dbOnce.Do(func() {
+		fmt.Println("初始化全局唯一数据库连接池...")
+		dbInstance = &DBClient{ConnStr: "mysql://127.0.0.1:3306/prod"}
+	})
+	return dbInstance
+}
+
+// ==================== 2. 工厂模式（Factory） ====================
+// 场景：屏蔽复杂创建细节，根据参数动态返回实现了统一接口的不同结构体
+type Payer interface {
+	Pay(amount float64) string
+}
+
+type Alipay struct{}
+func (a *Alipay) Pay(amount float64) string { return fmt.Sprintf("支付宝支付 %.2f 元", amount) }
+
+type WechatPay struct{}
+func (w *WechatPay) Pay(amount float64) string { return fmt.Sprintf("微信支付 %.2f 元", amount) }
+
+func NewPayer(channel string) (Payer, error) {
+	switch channel {
+	case "alipay":
+		return &Alipay{}, nil
+	case "wechat":
+		return &WechatPay{}, nil
+	default:
+		return nil, fmt.Errorf("不支持的支付渠道: %s", channel)
+	}
+}
+
+// ==================== 3. 选项模式（Functional Options） ====================
+// 场景：解决 Go 不支持函数重载与默认参数的痛点，优雅配置十几个可选参数（gRPC/Zap 标配）
+type Server struct {
+	Addr    string
+	Timeout time.Duration
+	MaxConn int
+}
+
+type Option func(*Server)
+
+func WithTimeout(t time.Duration) Option {
+	return func(s *Server) { s.Timeout = t }
+}
+
+func WithMaxConn(n int) Option {
+	return func(s *Server) { s.MaxConn = n }
+}
+
+func NewServer(addr string, opts ...Option) *Server {
+	srv := &Server{Addr: addr, Timeout: 3 * time.Second, MaxConn: 100} // 1. 默认值
+	for _, opt := range opts {
+		opt(srv) // 2. 按需覆盖用户传入的配置
+	}
+	return srv
+}
+
+// ==================== 4. 生产者-消费者模式（Producer-Consumer） ====================
+// 场景：秒杀下单异步削峰，前端请求塞入管道立刻返回，后台固定协程慢慢消费写库
+func demoProducerConsumer() {
+	taskCh := make(chan int, 100) // 容量为 100 的缓冲管道
+	var wg sync.WaitGroup
+
+	// 启动 3 个消费者协程
+	for w := 1; w <= 3; w++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			// 【核心机制】通道 close 后，缓冲区里残留的数据不会丢失！
+			// for range 会把残留数据全部读完，直到通道变空且已关闭才自动退出循环
+			for orderID := range taskCh {
+				fmt.Printf("消费者 %d 处理订单: %d\n", workerID, orderID)
+			}
+		}(w)
+	}
+
+	// 生产者投递 10 个订单
+	for orderID := 1; orderID <= 10; orderID++ {
+		taskCh <- orderID
+	}
+	// 投递完毕必须关闭管道！通知消费者“没有新货了，取完剩下的就可以下班”，否则消费者会死等引发死锁
+	close(taskCh)
+
+	wg.Wait() // 主协程阻塞等待所有消费者把剩余订单处理完再结束程序
+}
+```
+
+## 第四章：`switch` vs `select` 与 `channel` 符号彻底拆解
+
+### 1. 分清两兄弟：`switch` 与 `select`
+
+- **`switch`**：用于普通业务逻辑的**值比对与布尔条件判断**（默认自带 `break` 不会穿透）。
+- **`select`**：**专用于并发管道（`channel`）的多路监听**。
+  - **语法铁律**：`select` 的每个 `case` 冒号前面，**只允许写“对 channel 的读（`<-ch`）或写（`ch <- x`）操作”**，绝不能写数字或 `true/false` 表达式（写了直接编译报错）。
+  - **触发契机（监控室保安模型）**：不是从上往下顺序执行！进入 `select` 时，当前协程同时盯着所有管道；哪个管道背后的工人先干完活往管道塞了数据（或关闭了管道），使得这句读写操作**不再卡住（能够顺利完成）**，调度器就会立刻唤醒协程执行对应 `case`（`case res := <-ch:` 顺手用变量接住值，`case <-ch:` 则直接丢弃值，触发时机 100% 相同）。若都未就绪且无 `default`，当前协程休眠阻塞不占 CPU；若多路同时就绪，**伪随机等概率选一个执行**。
+
+### 2. 看懂 `<-` 箭头与 `time.After`
+
+- **`<-` 在语句中（动作）**：`ch <- 10`（写入管道）、`x := <-ch`（读取并接收）、`<-ch`（读取并丢弃）。
+- **`<-` 在类型定义中（权限限制）**：紧贴 `chan` 左边，如 `<-chan struct{}`，表示**只读管道类型**（编译期禁止往里写数据）。
+- **`case <-time.After(3 \* time.Second):`**：调用 `time.After` 会**瞬间**在后台时间堆注册一个 3 秒定时器，并**立刻返回一根管道（`<-chan time.Time`）**。3 秒未到时管道为空（该 `case` 阻塞）；3 秒一到，Go 后台系统线程会往该管道塞入当前时间，管道瞬间变通从而唤醒 `select` 执行超时分支。
+
+```
+func QueryDBWithTimeout() (string, error) {
+	dbChan := make(chan string, 1)
+
+	go func() {
+		time.Sleep(5 * time.Second) // 模拟数据库慢查询耗时 5 秒
+		dbChan <- "用户档案数据"
+	}()
+
+	// 同时监听两个事件：数据库返回 vs 3秒超时（谁先能从管道读出数据，就走谁）
+	select {
+	case res := <-dbChan:
+		return res, nil
+	case <-time.After(3 * time.Second):
+		return "", errors.New("查询数据库超时（超过3秒）")
+	}
+}
+```
+
+## 第五章：`context.Context` 源码结构与核心用法
+
+### 1. 接口定义与底层魔法
+
+- `context` 是包名，`Context` 是接口名（连写 `context.Context`；因为本身是接口类型，底层已包含类型与数据指针，**传参直接写 `ctx context.Context`，绝不写指针 `\*context.Context`**）。
+- **核心广播魔法**：`cancelCtx` 结构体内部包着一根 `done chan struct{}`（空结构体占 0 字节）。利用 Go 中`close()` 关闭一个 channel 会一瞬间唤醒所有正在读取该 channel 的协程这一特性，实现一对多树形级联广播。
+
+```
+type Context interface {
+	Deadline() (deadline time.Time, ok bool) // 获取截止时间（若有设置）
+	Done() <-chan struct{}                   // 【核心】返回只读信号管道；取消或超时时底层会 close() 它
+	Err() error                              // 方法名 Err()，返回 error 类型：手动取消返回 context.Canceled；超时返回 context.DeadlineExceeded
+	Value(key any) any                       // 按 key 获取携带的请求级元数据（如 TraceID）
+}
+```
+
+### 2. 常用 6 个函数与父子挂载原理
+
+1. `context.Background()`：创建最顶层空根节点（永不取消），用于 `main` 或请求源头。
+2. `context.TODO()`：底层同 `Background()`，用于开发过渡占位。
+3. `ctx, cancel := context.WithCancel(parent)`：派生可手动取消的子节点。底层源码 `propagateCancel` 会加锁把子 `ctx` 挂载到父节点的 **`children map[canceler]struct{}`** 哈希表中；父取消时遍历该 `map` 递归取消所有后代（**单向向下传播，绝不反向影响父节点**）。
+4. `ctx, cancel := context.WithTimeout(parent, duration)`：派生相对时间超时节点。
+5. `ctx, cancel := context.WithDeadline(parent, timePoint)`：派生绝对时间点超时节点（`WithTimeout` 底层直接调用它）。
+6. `ctx := context.WithValue(parent, key, val)`：底层是**单向链表**，查找时间复杂度 **$O(N)$**；`key` 必须定义为**包内私有自定义类型**防冲突，严禁塞业务函数参数。
+
+### 3. 标准工程模板（超时控制 + `defer cancel()` 防泄漏）
+
+```
+func FetchUserInfo(parentCtx context.Context) error {
+	// 1. 基于上游传入的 parentCtx，派生一个最多等 2 秒的子 ctx
+	ctx, cancel := context.WithTimeout(parentCtx, 2*time.Second)
+
+	// 2. 【秋招必考铁律】为什么超时控制还要写 defer cancel()？
+	// 若任务在 0.1 秒就提前走第一个 case return 了，不调 cancel() 会导致：
+	// (1) 子 ctx 一直挂在父节点的 children map 里无法被 GC 回收（内存泄漏）；
+	// (2) 底层 time.Timer 定时器还要多活 1.9 秒才释放（计时器资源泄漏）。
+	defer cancel()
+
+	select {
+	case <-time.After(100 * time.Millisecond): // 模拟 0.1 秒提前完成业务
+		fmt.Println("0.1秒提前处理完成")
+		return nil // 触发 return -> 触发 defer cancel() -> 立刻摘除子节点并销毁定时器！
+	case <-ctx.Done(): // 若超时（2秒到）或上游取消，管道被 close，立刻触发这里
+		fmt.Println("任务终止，退出原因:", ctx.Err())
+		return ctx.Err()
+	}
+}
+```
+
+## 第六章：`errgroup` 并发错误组（`golang.org/x/sync/errgroup`）
+
+### 1. 底层数据结构与核心机制
+
+**`errgroup` = `sync.WaitGroup` + 收集首个 `error` + `context` 级联取消（一损俱损，快速失败 Fail-Fast）**。
+
+包内核心结构体 `Group`（实例习惯简写为 `g`）源码定义如下：
+
+```
+type Group struct {
+	cancel  func(error)    // 【核心】保存着派生子 ctx 的 cancel 取消按钮！
+	wg      sync.WaitGroup // 等待所有子协程结束
+	sem     chan token     // SetLimit 并发限流信号量管道
+	errOnce sync.Once      // 保证只记录时间上最先出现的非 nil error
+	err     error          // 保存首个 error
+}
+```
+
+- **双重控制原理**：调用 `g, ctx := errgroup.WithContext(parentCtx)` 时，`g` 基于 `parentCtx` 派生出新子 `ctx`，把 `ctx` 返回给你，同时把 `cancel` 按钮留在 `g.cancel` 字段里。因此**父 `parentCtx` 取消（如前端断网） OR 任意一个 `g.Go()` 报错（`g` 自己按下 `g.cancel()`）**，都会瞬间关闭子 `ctx` 通知其他兄弟协程撤退！
+
+### 2. 真实 Web 接口并发编排完整代码
+
+```
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+)
+
+func ProductDetailHandler(w http.ResponseWriter, r *http.Request) {
+	// 1. 从 HTTP 请求 r 中拿到框架自动创建的根上下文（前端断开连接时会自动取消）
+	rootCtx := r.Context()
+
+	// 2. 创建错误组 g，并获取受 g 控制的派生子 ctx
+	g, ctx := errgroup.WithContext(rootCtx)
+	g.SetLimit(10) // 可选：限制最大同时并发协程数为 10
+
+	var title string
+	var comments []string
+
+	// 任务 1：查商品标题（模拟 20ms 后报错）
+	g.Go(func() error {
+		time.Sleep(20 * time.Millisecond)
+		return errors.New("商品基础服务数据库异常") // 触发 g.errOnce.Do，记录错误并立刻按下 g.cancel()！
+	})
+
+	// 任务 2：查商品评价（模拟慢接口，原本需 3 秒）
+	g.Go(func() error {
+		select {
+		case <-time.After(3 * time.Second):
+			comments = []string{"好评", "物流很快"}
+			return nil
+		case <-ctx.Done():
+			// 20ms 时子 ctx 管道被 g 关闭，这里 0 延迟立刻收到信号提前撤退！
+			fmt.Println("评价查询被级联取消，释放资源！原因:", ctx.Err())
+			return ctx.Err()
+		}
+	})
+
+	// 3. 阻塞等待所有子任务退出，并返回第一个出现的非 nil 错误
+	if err := g.Wait(); err != nil {
+		http.Error(w, "加载失败: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintf(w, "商品: %s, 评价: %v", title, comments)
+}
+```
+
+## 第七章：切片（Slice）底层陷阱与秋招必看源码清单
+
+### 1. 切片双索引 vs 三索引（隔板模型）与内存泄漏
+
+把数组元素缝隙看作**隔板编号（从 `0` 开始）**：`0 | 1 | 2 | 3`（元素 `[1, 2, 3]`）
+
+- **双索引 `b := a[low : high]`**：`len = high - low`，`cap = cap(a) - low`（默认通到原数组末尾，未超 `cap` 时 `append` 会直接覆盖原数组数据）。   
+
+- **三索引 `b := a[low : high : max]`**：`len = high - low`，`cap = max - low`（如 `a[1:2:2]` 让 `len == cap == 1`，一出生即满仓，后续 `append` 必触发扩容搬家，防止覆盖原数组）。   
+
+- **防内存泄漏（必须用 `copy`）**：三索引切片 `bigData[:10:10]` 底层指针依然拽着 100MB 原大数组导致 GC 无法回收；必须用 `make` 开辟独立小空间并 `copy` 拷贝切断关联：   
+
+  ```
+  header := make([]byte, 10)
+  copy(header, bigData[:10]) // 彻底释放原 100MB 大数组引用，使其可被 GC 回收[cite: 1]
+  ```
+
+### 2. 秋招必看 Go 核心源码阅读清单（按优先级排序）
+
+1. **`context/context.go` & `errgroup/errgroup.go`**：吃透 `cancelCtx` 树形结构、`propagateCancel` 挂载与 `sync.Once` 捕获首错。
+2. **`runtime/chan.go`**：必看 `hchan` 结构体（环形队列 `buf`、读写游标 `sendx/recvx`、等待队列 `sendq/recvq`、互斥锁 `lock`），理解关闭通道读写规则。
+3. **`sync/mutex.go`、`sync/once.go`、`sync/map.go`**：加起来不到 800 行，掌握状态位掩码、饥饿模式、DCL 与 `read/dirty` 双 map 晋升。
+4. **`runtime/slice.go` & `runtime/map.go`**：掌握 `growslice` 扩容规律（Go 1.18+ 以 256 为界平滑过渡）与内存对齐；掌握 `hmap`、`bmap`（桶结构与 `tophash`）及渐进式扩容（等量扩容 vs 翻倍扩容）。
+5. **`runtime/proc.go`（GMP 调度器核心）**：重点看 `schedule`、`findrunnable`、`gopark`、`goready`，理解工作窃取（Work Stealing）与系统调用阻塞剥离 P 的机制。
+6. **`net/http/server.go`**：看 `Serve()` 如何为每个连接起 `go c.serve(connCtx)` 协程，理解 `r.Context()` 生命周期闭环。
 
 ## 一、 核心基石：值类型 vs 引用类型与内存分配
 
